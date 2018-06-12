@@ -3,4 +3,4 @@ Description=Data Maintainance for Quantitative Investment
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/qata futures -d 192.168.2.102
+ExecStart=/usr/local/bin/qata futures --host 192.168.2.102 -d avaloron

@@ -55,8 +55,8 @@ def update_futures(args):
     """
     client = pymongo.MongoClient(args.mongo_uri, serverSelectionTimeoutMS=1000)
     client.server_info()
-    min1_db = client['avaloron']
-    col = min1_db['future_china_1min']
+    db = client[args.database]
+    collection = db['future_china_1min']
     api = TdxExHq_API(heartbeat=True, multithread=True)
     api.connect('61.152.107.141', 7727)
     num = api.get_instrument_count()
@@ -67,7 +67,7 @@ def update_futures(args):
     ensure_fut = lambda t: (t['market'] in markets) and (t['code'][-2] != 'L')
     futures =  [t for t in insts if ensure_fut(t)]
     for future in futures:
-        qeury = col.find({"ticker": future['code']})
+        qeury = collection.find({"ticker": future['code']})
         qeury = qeury.sort('datetime', pymongo.DESCENDING)
         qeury = qeury.limit(1)
         last_one = list(qeury)
@@ -104,7 +104,7 @@ def update_futures(args):
         data.sort(key=lambda x: x['datetime'])
         _s = lambda x: x['datetime'] >= last_date and x['datetime'] <= end_date
         data = list(filter(_s, data))
-        col.insert_many(data) if len(data) > 0 else 0
+        collection.insert_many(data) if len(data) > 0 else 0
 
         _logger.info(future['code'])
     api.disconnect()
@@ -142,12 +142,18 @@ def parse_args(args):
     subparsers = parser.add_subparsers()
     parser_future = subparsers.add_parser('futures')
     parser_future.add_argument(
-        '-d',
-        '--mongo',
+        '--host',
         dest='mongo_uri',
         help="set MongoDB uri",
         action='store',
         default='localhost:27017')
+    parser_future.add_argument(
+        '-d',
+        '--database',
+        dest='database',
+        help="set database name",
+        action='store',
+        default='qata')
     parser_future.set_defaults(func=update_futures)
     return parser.parse_args(args)
 
