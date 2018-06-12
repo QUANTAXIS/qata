@@ -21,30 +21,93 @@ import argparse
 import sys
 import logging
 
+import pymongo
+from pytdx.exhq import TdxExHq_API
+from pytdx.params import TDXParams
+from datetime import datetime, time, timedelta
+from functools import partial
 from qata import __version__
+sys.excepthook = sys.__excepthook__
 
 __author__ = "hardywu"
 __copyright__ = "hardywu"
 __license__ = "mit"
 
+QSIZE = 500
 _logger = logging.getLogger(__name__)
 
+def parse_record(ticker, record):
+    bar = record.copy()
+    bar['datetime'] = datetime.strptime(bar['datetime'], '%Y-%m-%d %H:%M')
+    bar['ticker'] = ticker
+    for key in ['year', 'month', 'day', 'hour', 'minute', 'price']:
+        bar.pop(key, None)
+    bar['oi'] = bar.pop('position', None)
+    bar['volume'] = bar.pop('trade', None)
+    bar['turnover'] = bar.pop('amount', None)
+    return bar
 
-def fib(n):
-    """Fibonacci example function
+def update_futures(args):
+    """Update Future 1min data in MongoDB
 
     Args:
-      n (int): integer
-
     Returns:
-      int: n-th Fibonacci number
     """
-    assert n > 0
-    a, b = 1, 1
-    for i in range(n-1):
-        a, b = b, a+b
-    return a
+    client = pymongo.MongoClient(args.mongo_uri, serverSelectionTimeoutMS=1000)
+    client.server_info()
+    min1_db = client['avaloron']
+    col = min1_db['future_china_1min']
+    api = TdxExHq_API(heartbeat=True, multithread=True)
+    api.connect('61.152.107.141', 7727)
+    num = api.get_instrument_count()
+    insts = [api.get_instrument_info(i, QSIZE) for i in range(0, num, QSIZE)]
+    insts = [x for i in insts for x in i]
+    ex = ['中金所期货', '上海期货', '大连商品', '郑州商品']
+    markets = [t['market'] for t in api.get_markets() if t['name'] in ex]
+    ensure_fut = lambda t: (t['market'] in markets) and (t['code'][-2] != 'L')
+    futures =  [t for t in insts if ensure_fut(t)]
+    for future in futures:
+        qeury = col.find({"ticker": future['code']})
+        qeury = qeury.sort('datetime', pymongo.DESCENDING)
+        qeury = qeury.limit(1)
+        last_one = list(qeury)
 
+        if len(last_one) > 0:
+            last_date = last_one[-1]['datetime'] + timedelta(minutes=1)
+        else:
+            last_date = datetime.now() - timedelta(days=365)
+        end_date = datetime.now().date()
+        end_date = datetime.combine(end_date - timedelta(days=1), time(15,0))
+        _start_date = end_date
+        _bars = []
+        _pos = 0
+        while _start_date > last_date:
+            _res = api.get_instrument_bars(TDXParams.KLINE_TYPE_1MIN,
+                future['market'],
+                future['code'],
+                _pos,
+                QSIZE)
+            try:
+                _bars += _res
+            except TypeError:
+               continue
+            _pos += QSIZE
+            if len(_res) > 0:
+                _start_date = _res[0]['datetime']
+                _start_date = datetime.strptime(_start_date, '%Y-%m-%d %H:%M')
+            else:
+                break
+        if len(_bars) == 0:
+            continue
+        parser = partial(parse_record, future['code'])
+        data = list(map(parser, _bars))
+        data.sort(key=lambda x: x['datetime'])
+        _s = lambda x: x['datetime'] >= last_date and x['datetime'] <= end_date
+        data = list(filter(_s, data))
+        col.insert_many(data) if len(data) > 0 else 0
+
+        _logger.info(future['code'])
+    api.disconnect()
 
 def parse_args(args):
     """Parse command line parameters
@@ -56,16 +119,11 @@ def parse_args(args):
       :obj:`argparse.Namespace`: command line parameters namespace
     """
     parser = argparse.ArgumentParser(
-        description="Just a Fibonnaci demonstration")
+        description="Data Maintainance Tool for Quantitative Investment")
     parser.add_argument(
         '--version',
         action='version',
         version='qata {ver}'.format(ver=__version__))
-    parser.add_argument(
-        dest="n",
-        help="n-th Fibonacci number",
-        type=int,
-        metavar="INT")
     parser.add_argument(
         '-v',
         '--verbose',
@@ -80,6 +138,17 @@ def parse_args(args):
         help="set loglevel to DEBUG",
         action='store_const',
         const=logging.DEBUG)
+    parser.set_defaults(loglevel=logging.INFO)
+    subparsers = parser.add_subparsers()
+    parser_future = subparsers.add_parser('futures')
+    parser_future.add_argument(
+        '-d',
+        '--mongo',
+        dest='mongo_uri',
+        help="set MongoDB uri",
+        action='store',
+        default='localhost:27017')
+    parser_future.set_defaults(func=update_futures)
     return parser.parse_args(args)
 
 
@@ -103,7 +172,7 @@ def main(args):
     args = parse_args(args)
     setup_logging(args.loglevel)
     _logger.debug("Starting crazy calculations...")
-    print("The {}-th Fibonacci number is {}".format(args.n, fib(args.n)))
+    args.func(args)
     _logger.info("Script ends here")
 
 

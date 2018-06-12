@@ -17,6 +17,7 @@ entry_points = """
 # script_name = qata.module:function
 # For example:
 # fibonacci = qata.skeleton:run
+qata = qata.skeleton:run
 """
 
 
