@@ -1,0 +1,8 @@
+[Unit]
+Description=Run qata.service every day
+
+[Timer]
+OnCalendar=Mon,Tue,Wed,Thu,Fri *-*-* 17:00:00
+
+[Install]
+WantedBy=timers.target
