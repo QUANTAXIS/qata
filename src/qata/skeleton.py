@@ -36,6 +36,7 @@ __license__ = "mit"
 QSIZE = 500
 _logger = logging.getLogger(__name__)
 
+
 def parse_record(ticker, record):
     bar = record.copy()
     bar['datetime'] = datetime.strptime(bar['datetime'], '%Y-%m-%d %H:%M')
@@ -46,6 +47,7 @@ def parse_record(ticker, record):
     bar['volume'] = bar.pop('trade', None)
     bar['turnover'] = bar.pop('amount', None)
     return bar
+
 
 def update_futures(args):
     """Update Future 1min data in MongoDB
@@ -64,8 +66,11 @@ def update_futures(args):
     insts = [x for i in insts for x in i]
     ex = ['中金所期货', '上海期货', '大连商品', '郑州商品']
     markets = [t['market'] for t in api.get_markets() if t['name'] in ex]
-    ensure_fut = lambda t: (t['market'] in markets) and (t['code'][-2] != 'L')
-    futures =  [t for t in insts if ensure_fut(t)]
+
+    def ensure_fut(t):
+        return (t['market'] in markets) and (t['code'][-2] != 'L')
+
+    futures = [t for t in insts if ensure_fut(t)]
     for future in futures:
         qeury = collection.find({"ticker": future['code']})
         qeury = qeury.sort('datetime', pymongo.DESCENDING)
@@ -77,12 +82,13 @@ def update_futures(args):
         else:
             last_date = datetime.now() - timedelta(days=365)
         end_date = datetime.now().date()
-        end_date = datetime.combine(end_date - timedelta(days=1), time(15,0))
+        end_date = datetime.combine(end_date - timedelta(days=1), time(15, 0))
         _start_date = end_date
         _bars = []
         _pos = 0
         while _start_date > last_date:
-            _res = api.get_instrument_bars(TDXParams.KLINE_TYPE_1MIN,
+            _res = api.get_instrument_bars(
+                TDXParams.KLINE_TYPE_1MIN,
                 future['market'],
                 future['code'],
                 _pos,
@@ -90,7 +96,7 @@ def update_futures(args):
             try:
                 _bars += _res
             except TypeError:
-               continue
+                continue
             _pos += QSIZE
             if len(_res) > 0:
                 _start_date = _res[0]['datetime']
@@ -102,12 +108,15 @@ def update_futures(args):
         parser = partial(parse_record, future['code'])
         data = list(map(parser, _bars))
         data.sort(key=lambda x: x['datetime'])
-        _s = lambda x: x['datetime'] >= last_date and x['datetime'] <= end_date
+
+        def _s(x):
+            return x['datetime'] >= last_date and x['datetime'] <= end_date
         data = list(filter(_s, data))
         collection.insert_many(data) if len(data) > 0 else 0
 
         _logger.info(future['code'])
     api.disconnect()
+
 
 def parse_args(args):
     """Parse command line parameters
