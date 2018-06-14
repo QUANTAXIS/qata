@@ -25,7 +25,7 @@ import pymongo
 from pytdx.exhq import TdxExHq_API
 from pytdx.params import TDXParams
 from datetime import datetime, time, timedelta
-from functools import partial
+import pandas as pd
 from qata import __version__
 sys.excepthook = sys.__excepthook__
 
@@ -35,18 +35,6 @@ __license__ = "mit"
 
 QSIZE = 500
 _logger = logging.getLogger(__name__)
-
-
-def parse_record(ticker, record):
-    bar = record.copy()
-    bar['datetime'] = datetime.strptime(bar['datetime'], '%Y-%m-%d %H:%M')
-    bar['ticker'] = ticker
-    for key in ['year', 'month', 'day', 'hour', 'minute', 'price']:
-        bar.pop(key, None)
-    bar['oi'] = bar.pop('position', None)
-    bar['volume'] = bar.pop('trade', None)
-    bar['turnover'] = bar.pop('amount', None)
-    return bar
 
 
 def update_futures(args):
@@ -64,13 +52,11 @@ def update_futures(args):
     num = api.get_instrument_count()
     insts = [api.get_instrument_info(i, QSIZE) for i in range(0, num, QSIZE)]
     insts = [x for i in insts for x in i]
-    ex = ['中金所期货', '上海期货', '大连商品', '郑州商品']
-    markets = [t['market'] for t in api.get_markets() if t['name'] in ex]
+    exchs = ['中金所期货', '上海期货', '大连商品', '郑州商品']
+    markets = [t['market'] for t in api.get_markets() if t['name'] in exchs]
+    futures = [t for t in insts
+               if t['market'] in markets and t['code'][-2] != 'L']
 
-    def ensure_fut(t):
-        return (t['market'] in markets) and (t['code'][-2] != 'L')
-
-    futures = [t for t in insts if ensure_fut(t)]
     for future in futures:
         qeury = collection.find({"ticker": future['code']})
         qeury = qeury.sort('datetime', pymongo.DESCENDING)
@@ -78,11 +64,11 @@ def update_futures(args):
         last_one = list(qeury)
 
         if len(last_one) > 0:
-            last_date = last_one[-1]['datetime'] + timedelta(minutes=1)
+            last_date = last_one[0]['datetime'] + timedelta(minutes=1)
         else:
             last_date = datetime.now() - timedelta(days=365)
         end_date = datetime.now().date()
-        end_date = datetime.combine(end_date - timedelta(days=1), time(15, 0))
+        end_date = datetime.combine(end_date - timedelta(days=1), time(16, 0))
         _start_date = end_date
         _bars = []
         _pos = 0
@@ -105,14 +91,23 @@ def update_futures(args):
                 break
         if len(_bars) == 0:
             continue
-        parser = partial(parse_record, future['code'])
-        data = list(map(parser, _bars))
-        data.sort(key=lambda x: x['datetime'])
 
-        def _s(x):
-            return x['datetime'] >= last_date and x['datetime'] <= end_date
-        data = list(filter(_s, data))
-        collection.insert_many(data) if len(data) > 0 else 0
+        data = api.to_df(_bars)
+        data = data.assign(datetime=pd.to_datetime(data['datetime']))
+        data = data.assign(ticker=future['code'])
+        data = data.drop(
+            ['year', 'month', 'day', 'hour', 'minute', 'price'],
+            axis=1)
+        data = data.rename(
+            index=str,
+            columns={
+                'position': 'oi',
+                'trade': 'volume',
+                'amount': 'turnover'
+            })
+        data = data.set_index('datetime', drop=False)
+        data = data[str(last_date):str(end_date)]
+        collection.insert_many(data.to_dict('records')) if len(data) > 0 else 0
 
         _logger.info(future['code'])
     api.disconnect()
