@@ -99,6 +99,7 @@ def update_futures(args):
         data = data.assign(ticker=future['code'])
         data = data.drop(
             ['year', 'month', 'day', 'hour', 'minute', 'price', 'amount'],
+            errors='ignore',
             axis=1)
         data = data.rename(
             index=str,
@@ -106,10 +107,10 @@ def update_futures(args):
                 'position': 'oi',
                 'trade': 'volume',
             })
-        data = data.set_index('datetime', drop=False)
         data['date'] = pd.to_datetime(data['datetime'].dt.date)
-        _miss_ts = data.index.hour > ALL_MARKET_END_HOUR
+        _miss_ts = data['datetime'].dt.hour > ALL_MARKET_END_HOUR
         data.loc[_miss_ts, 'datetime'] -= timedelta(days=1)
+        data = data.set_index('datetime', drop=False)
         data = data[str(last_date):str(end_date)]
         collection.insert_many(data.to_dict('records')) if len(data) > 0 else 0
 
