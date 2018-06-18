@@ -98,17 +98,16 @@ def update_futures(args):
         data = data.assign(datetime=pd.to_datetime(data['datetime']))
         data = data.assign(ticker=future['code'])
         data = data.drop(
-            ['year', 'month', 'day', 'hour', 'minute', 'price'],
+            ['year', 'month', 'day', 'hour', 'minute', 'price', 'amount'],
             axis=1)
         data = data.rename(
             index=str,
             columns={
                 'position': 'oi',
                 'trade': 'volume',
-                'amount': 'turnover'
             })
         data = data.set_index('datetime', drop=False)
-        data['date'] = data['datetime'].dt.date
+        data['date'] = pd.to_datetime(data['datetime'].dt.date)
         _miss_ts = data.index.hour > ALL_MARKET_END_HOUR
         data.loc[_miss_ts, 'datetime'] -= timedelta(days=1)
         data = data[str(last_date):str(end_date)]
