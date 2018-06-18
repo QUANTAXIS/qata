@@ -106,6 +106,9 @@ def update_futures(args):
                 'amount': 'turnover'
             })
         data = data.set_index('datetime', drop=False)
+        data['date'] = data['datetime'].dt.date
+        _miss_ts = data.index.hour > 17
+        data.loc[_miss_ts, 'datetime'] -= timedelta(days=1)
         data = data[str(last_date):str(end_date)]
         collection.insert_many(data.to_dict('records')) if len(data) > 0 else 0
 
