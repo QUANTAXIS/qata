@@ -34,6 +34,7 @@ __copyright__ = "hardywu"
 __license__ = "mit"
 
 QSIZE = 500
+ALL_MARKET_END_HOUR = 17
 _logger = logging.getLogger(__name__)
 
 
@@ -68,7 +69,8 @@ def update_futures(args):
         else:
             last_date = datetime.now() - timedelta(days=365)
         end_date = datetime.now().date()
-        end_date = datetime.combine(end_date - timedelta(days=1), time(16, 0))
+        end_date = datetime.combine(end_date - timedelta(days=1),
+                                    time(ALL_MARKET_END_HOUR, 0))
         _start_date = end_date
         _bars = []
         _pos = 0
@@ -107,7 +109,7 @@ def update_futures(args):
             })
         data = data.set_index('datetime', drop=False)
         data['date'] = data['datetime'].dt.date
-        _miss_ts = data.index.hour > 17
+        _miss_ts = data.index.hour > ALL_MARKET_END_HOUR
         data.loc[_miss_ts, 'datetime'] -= timedelta(days=1)
         data = data[str(last_date):str(end_date)]
         collection.insert_many(data.to_dict('records')) if len(data) > 0 else 0
