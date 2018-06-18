@@ -82,7 +82,7 @@ def update_futures(args):
                 _pos,
                 QSIZE)
             try:
-                _bars += _res
+                _bars = _res + _bars
             except TypeError:
                 continue
             _pos += QSIZE
